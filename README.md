@@ -32,7 +32,7 @@ https://launch-lens-ai-mu.vercel.app/
 
 📂 GitHub Repository
 
-https://github.com/YOUR_GITHUB_REPO
+https://github.com/syedataiba12311-coder/LaunchLens-AI.git
 
 
 ✨ Features
