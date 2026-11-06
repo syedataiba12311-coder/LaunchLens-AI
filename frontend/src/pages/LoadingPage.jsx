@@ -1,135 +1,99 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion } from 'framer-motion'
-import { ArrowRight, Sparkles } from 'lucide-react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { analyzeStartup } from '../services/api'
+import OpenAI from "openai";
+import { buildPrompt } from "../prompts/startupPrompt.js";
 
-const messages = [
-  'Analyzing market...',
-  'Finding competitors...',
-  'Evaluating business model...',
-  'Generating SWOT...',
-  'Preparing marketing strategy...',
-  'Almost done...',
-]
+const client = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY || "gsk_placeholder",
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
-function LoadingPage() {
-  const [progress, setProgress] = useState(0)
-  const [messageIndex, setMessageIndex] = useState(0)
-  const location = useLocation()
-  const navigate = useNavigate()
-  const startupName = location.state?.startupName || 'your startup'
-  const payload = location.state?.payload || null
-  const [analysisResult, setAnalysisResult] = useState(location.state?.analysis || null)
-  const analysisRef = useRef(analysisResult)
+const buildFallbackReport = (data) => ({
+  executiveSummary:
+    `${data.startupName || 'This startup'} has a clear problem-solution framing, but the idea needs stronger evidence before committing build time or budget.`,
+  problemStatement:
+    'The report could not be fully generated because the AI response was incomplete or invalid. Use the idea brief to refine the problem, target customer, and value proposition before moving forward.',
+  solution:
+    'Refine the startup concept with a clearer value proposition, measurable customer pain, and a sharp initial MVP. Treat this as a draft rather than a final decision.',
+  targetAudience: data.audience || 'Early-stage founders, target users, and decision-makers in the relevant market.',
+  competitors: [
+    {
+      company: 'Market competitors',
+      strength: 'Existing products may already serve the same customer.',
+      weakness: 'There is likely room for a more focused, better-executed niche offer.',
+      marketPosition: 'Early validation stage',
+    },
+  ],
+  swot: {
+    strengths: ['Clear intent', 'Good problem framing'],
+    weaknesses: ['Needs stronger validation', 'Requires clearer segmentation'],
+    opportunities: ['Targeted early traction', 'Strong messaging opportunities'],
+    threats: ['Competition', 'Unclear monetization'],
+  },
+  revenueModel: 'Use a narrow, easy-to-understand monetization strategy with a simple first customer segment and clear conversion path.',
+  mvpFeatures: ['Single core use case', 'Clear onboarding flow', 'Fast feedback loop'],
+  marketingStrategy: ['Customer interviews', 'Landing page tests', 'Targeted outreach'],
+  businessRisks: ['Weak differentiation', 'Unknown market demand', 'Execution overreach'],
+  recommendedTechStack: ['React', 'Node.js', 'PostgreSQL', 'AI API'],
+  roadmap: [{ month: 'Month 1', goal: 'Validate problem through interviews and landing-page tests' }],
+  successScore: 45,
+  recommendations: [
+    'Clarify the customer problem and ideal user profile.',
+    'Run interviews with at least 10 target users before building the full product.',
+    'Test a simple landing page or prototype to validate demand before scaling.',
+  ],
+  aiDisclaimer:
+    'This report was generated as a fallback after an AI processing error. It should be used as a rough starting point, not as a final strategic decision.',
+});
 
-  useEffect(() => {
-    analysisRef.current = analysisResult
-  }, [analysisResult])
-
-  useEffect(() => {
-    let isMounted = true
-
-    if (payload && !analysisResult) {
-      analyzeStartup(payload)
-        .then((res) => {
-          console.log('console.log(response):', res)
-          if (isMounted) {
-            const data = res?.data || res?.report || res
-            setAnalysisResult(data)
-            analysisRef.current = data
-          }
-        })
-        .catch((err) => {
-          console.error('Analysis request error:', err)
-        })
+export async function analyzeIdea(data) {
+  try {
+    console.log('🚀 Sending request to Groq...');
+    if (process.env.GROQ_API_KEY) {
+      client.apiKey = process.env.GROQ_API_KEY;
     }
 
-    const progressInterval = window.setInterval(() => {
-      setProgress((prev) => (prev >= 100 ? 100 : prev + 4))
-    }, 300)
+    const response = await client.chat.completions.create({
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert startup consultant and venture analyst. Evaluate startup submissions strictly and realistically based on actual feasibility and clarity. If the input is gibberish or nonsensical, assign a low score (0-15) and state that the input is invalid. Always return ONLY valid JSON without markdown or explanations.',
+        },
+        {
+          role: 'user',
+          content: buildPrompt(data),
+        },
+      ],
+      temperature: 0.7,
+      response_format: { type: 'json_object' },
+    });
 
-    const messageInterval = window.setInterval(() => {
-      setMessageIndex((prev) => (prev + 1) % messages.length)
-    }, 2200)
+    const text = response?.choices?.[0]?.message?.content || '';
 
-    const finishTimer = window.setTimeout(() => {
-      navigate('/report', { state: { startupName, analysis: analysisRef.current } })
-    }, 6500)
-
-    return () => {
-      isMounted = false
-      window.clearInterval(progressInterval)
-      window.clearInterval(messageInterval)
-      window.clearTimeout(finishTimer)
+    if (!text) {
+      throw new Error('The AI model returned an empty response.');
     }
-  }, [navigate, payload, startupName])
 
-  const activeMessage = useMemo(() => messages[messageIndex], [messageIndex])
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      console.error('Failed to parse Groq JSON:', error);
+      throw error;
+    }
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.2),_transparent_25%),linear-gradient(135deg,_#09090b_0%,_#111114_100%)] px-4 py-8 text-zinc-100 sm:px-6">
-      <motion.div
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="w-full max-w-2xl rounded-[32px] border border-zinc-800/80 bg-zinc-900/80 p-8 shadow-[0_25px_90px_rgba(0,0,0,0.3)] backdrop-blur-2xl sm:p-10"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-violet-300">Launching analysis</p>
-            <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
-              Preparing your validation report for {startupName}
-            </h1>
-          </div>
-          <div className="hidden rounded-full border border-violet-500/20 bg-violet-500/10 p-3 text-violet-300 sm:block">
-            <Sparkles size={20} />
-          </div>
-        </div>
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('The AI model returned an invalid payload structure.');
+    }
 
-        <div className="mt-10">
-          <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.3, ease: 'easeOut' }}
-              className="h-full rounded-full bg-gradient-to-r from-violet-600 via-fuchsia-400 to-sky-400"
-            />
-          </div>
+    parsed.aiDisclaimer =
+      'This report is AI-generated and intended for strategic guidance. Validate the output with market research, customer interviews, and product feasibility checks before making major decisions.';
 
-          <div className="mt-6 flex items-center justify-between text-sm text-zinc-400">
-            <span className="font-medium text-zinc-300">{activeMessage}</span>
-            <span>{progress}%</span>
-          </div>
-        </div>
+    return parsed;
+  } catch (error) {
+    console.error('❌ GROQ ERROR:');
+    console.error(error);
 
-        <div className="mt-8 rounded-[24px] border border-zinc-800 bg-zinc-950/70 p-5">
-          <div className="flex items-center gap-3 text-sm text-zinc-300">
-            <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-violet-400" />
-            Synthesizing your startup signal into a premium report
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2 text-xs text-zinc-500">
-            {['SWOT', 'Go-to-market', 'Roadmap', 'Model'].map((item) => (
-              <span key={item} className="rounded-full border border-zinc-800 px-3 py-1">
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-8 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={() => navigate('/report', { state: { startupName, analysis: analysisResult } })}
-            className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/70 px-4 py-2 text-sm font-medium text-zinc-200 transition hover:border-zinc-500"
-          >
-            Skip ahead
-            <ArrowRight size={16} />
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  )
+    return buildFallbackReport(data);
+  }
 }
-
-export default LoadingPage
